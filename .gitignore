@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data files - do not upload raw/source data
+*.csv
+*.xlsx
+*.xls
+
+# Environment / secret files
+*.env
+*.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
