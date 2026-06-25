@@ -120,7 +120,7 @@ def main() -> None:
     parser.add_argument(
         "--input-dir",
         type=Path,
-        default=Path.home() / "Downloads",
+        default=Path("raw data"),
         help="Folder containing the monthly CRMLS CSV files.",
     )
     parser.add_argument(
