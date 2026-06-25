@@ -144,6 +144,17 @@ def combine_group(
         total_filtered_rows += filtered_rows
 
     report = pd.DataFrame(report_rows)
+    total_row = {
+        "group": label,
+        "file": "TOTAL",
+        "month": "",
+        "source_version": "summary",
+        "columns": "",
+        "total_rows": total_rows,
+        "residential_rows": total_filtered_rows,
+        "non_residential_rows": total_rows - total_filtered_rows,
+    }
+    report = pd.concat([report, pd.DataFrame([total_row])], ignore_index=True)
     report.to_csv(report_path, index=False)
 
     print(f"Saved {total_rows:,} total rows to {all_output_path}")
