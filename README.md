@@ -15,3 +15,10 @@ Week 1 - Monthly Dataset Aggregation:
 - Combined monthly sold files into one unfiltered sold dataset.
 - Created Residential-only filtered versions of both datasets.
 - Created row-count reports showing monthly totals and Residential-filtered totals.
+
+Week 2 - Dataset Validation:
+- Created `scripts/dataset_validation.py`.
+- Reviewed dataset dimensions, column types, and property-type distributions.
+- Calculated missing counts and percentages for each field.
+- Flagged non-core fields with 50% or more missing data as drop candidates.
+- Protected core analysis fields and created numeric summary reports for key MLS fields.

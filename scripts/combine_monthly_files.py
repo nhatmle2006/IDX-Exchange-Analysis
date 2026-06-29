@@ -9,6 +9,7 @@ import pandas as pd
 
 
 START_MONTH = "202401"
+DUPLICATE_COLUMN_SUFFIX = re.compile(r"^(?P<base>.+)\.\d+$")
 
 
 def previous_month() -> str:
@@ -69,18 +70,51 @@ def get_month(path: Path) -> str:
     return match.group(1) if match else ""
 
 
+def duplicate_column_base(column: str, columns: list[str]) -> str | None:
+    match = DUPLICATE_COLUMN_SUFFIX.match(column)
+    if not match:
+        return None
+
+    base = match.group("base")
+    return base if base in columns else None
+
+
 def read_columns(files: list[Path]) -> list[str]:
     columns: list[str] = []
     seen: set[str] = set()
 
     for path in files:
-        header = pd.read_csv(path, nrows=0).columns
+        header = list(pd.read_csv(path, nrows=0).columns)
         for column in header:
+            if duplicate_column_base(column, header):
+                continue
             if column not in seen:
                 columns.append(column)
                 seen.add(column)
 
     return columns
+
+
+def remove_exact_duplicate_columns(chunk: pd.DataFrame, path: Path) -> tuple[pd.DataFrame, list[str]]:
+    columns = list(chunk.columns)
+    duplicates_to_remove: list[str] = []
+
+    for column in columns:
+        base = duplicate_column_base(column, columns)
+        if not base:
+            continue
+
+        same_values = chunk[base].eq(chunk[column]) | (
+            chunk[base].isna() & chunk[column].isna()
+        )
+        if not bool(same_values.fillna(False).all()):
+            raise ValueError(
+                f"{path.name} contains duplicate columns {base!r} and {column!r} "
+                "with different values."
+            )
+        duplicates_to_remove.append(column)
+
+    return chunk.drop(columns=duplicates_to_remove), duplicates_to_remove
 
 
 def combine_group(
@@ -110,8 +144,12 @@ def combine_group(
     for path in files:
         file_rows = 0
         filtered_rows = 0
+        removed_duplicates: set[str] = set()
 
         for chunk in pd.read_csv(path, low_memory=False, chunksize=100_000):
+            chunk, removed = remove_exact_duplicate_columns(chunk, path)
+            removed_duplicates.update(removed)
+
             if "PropertyType" not in chunk.columns:
                 raise ValueError(f"{path.name} does not have a PropertyType column.")
 
@@ -127,7 +165,15 @@ def combine_group(
             filtered.to_csv(filtered_output_path, index=False, mode="a", header=not wrote_filtered_header)
             wrote_filtered_header = True
 
-        print(f"{path.name}: {file_rows:,} total rows; {filtered_rows:,} Residential rows")
+        duplicate_note = (
+            f"; removed {len(removed_duplicates)} exact duplicate columns"
+            if removed_duplicates
+            else ""
+        )
+        print(
+            f"{path.name}: {file_rows:,} total rows; "
+            f"{filtered_rows:,} Residential rows{duplicate_note}"
+        )
         report_rows.append(
             {
                 "group": label,
@@ -135,6 +181,7 @@ def combine_group(
                 "month": get_month(path),
                 "source_version": "filled" if "_filled" in path.stem.lower() else "plain",
                 "columns": len(columns),
+                "duplicate_columns_removed": len(removed_duplicates),
                 "total_rows": file_rows,
                 "residential_rows": filtered_rows,
                 "non_residential_rows": file_rows - filtered_rows,
@@ -150,6 +197,7 @@ def combine_group(
         "month": "",
         "source_version": "summary",
         "columns": "",
+        "duplicate_columns_removed": "",
         "total_rows": total_rows,
         "residential_rows": total_filtered_rows,
         "non_residential_rows": total_rows - total_filtered_rows,
