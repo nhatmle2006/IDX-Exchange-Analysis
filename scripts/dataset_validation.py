@@ -1,4 +1,4 @@
-"""Validate combined MLS datasets and create four readable quality reports.
+"""Validate combined MLS datasets and create readable quality reports.
 
 Outputs:
 - dataset_summary.csv: dataset size and Residential row counts
@@ -20,8 +20,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_INPUT_DIR = PROJECT_ROOT / "data" / "processed"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "validation"
 CHUNK_SIZE = 100_000
-# Team guidance: review non-core fields when at least half their values are missing.
-MISSING_DROP_REVIEW_THRESHOLD = 50.0
+MISSING_REVIEW_THRESHOLD = 50.0
+MISSING_DROP_THRESHOLD = 90.0
 
 DATASET_FILES = {
     "listings_all": "combined_listings_all.csv",
@@ -30,7 +30,7 @@ DATASET_FILES = {
     "sold_residential": "filtered_sold_residential.csv",
 }
 
-CORE_ANALYSIS_FIELDS = {
+MARKET_DASHBOARD_FIELDS = {
     "PropertyType",
     "PropertySubType",
     "MlsStatus",
@@ -55,11 +55,16 @@ CORE_ANALYSIS_FIELDS = {
     "MLSAreaMajor",
     "Latitude",
     "Longitude",
+}
+
+COMPETITIVE_DASHBOARD_FIELDS = {
     "ListOfficeName",
     "BuyerOfficeName",
     "ListAgentFullName",
     "BuyerAgentFullName",
 }
+
+CORE_ANALYSIS_FIELDS = MARKET_DASHBOARD_FIELDS | COMPETITIVE_DASHBOARD_FIELDS
 
 NUMERIC_FIELDS = [
     "ClosePrice",
@@ -170,20 +175,43 @@ def classify_column(column: str) -> tuple[str, str]:
     return "review", "needs_manual_review"
 
 
-def recommendation(base_column: str, field_group: str, missing_percent: float) -> str:
-    is_core = base_column in CORE_ANALYSIS_FIELDS
-    meets_missing_threshold = missing_percent >= MISSING_DROP_REVIEW_THRESHOLD
+def dashboard_relevance(base_column: str, field_group: str) -> str:
+    if base_column in MARKET_DASHBOARD_FIELDS:
+        return "market_analysis_dashboard"
+    if base_column in COMPETITIVE_DASHBOARD_FIELDS:
+        return "competitive_analysis_dashboard"
+    if field_group == "metadata_admin":
+        return "traceability_or_join_key"
+    if field_group == "market_analysis":
+        return "possible_supporting_filter"
+    return "not_used_in_current_dashboards"
 
-    if meets_missing_threshold and is_core:
-        return "retain_core_field_review_missingness"
-    if meets_missing_threshold:
-        return "review_drop_candidate"
-    if is_core:
-        return "retain_core_field"
+
+def recommendation(base_column: str, field_group: str, missing_percent: float) -> str:
+    relevance = dashboard_relevance(base_column, field_group)
+    supports_dashboard = relevance in {
+        "market_analysis_dashboard",
+        "competitive_analysis_dashboard",
+    }
+    over_drop_threshold = missing_percent > MISSING_DROP_THRESHOLD
+    meets_review_threshold = missing_percent >= MISSING_REVIEW_THRESHOLD
+
+    if over_drop_threshold and supports_dashboard:
+        return "review_before_drop_dashboard_field"
+    if over_drop_threshold:
+        return "drop_high_missing_field"
+    if meets_review_threshold and supports_dashboard:
+        return "retain_dashboard_field_review_missingness"
+    if meets_review_threshold:
+        return "review_optional_field_for_drop"
+    if supports_dashboard:
+        return "retain_dashboard_field"
     if field_group == "metadata_admin":
         return "retain_if_needed_for_traceability"
+    if relevance == "possible_supporting_filter":
+        return "retain_optional_supporting_field"
 
-    return "retain_for_now"
+    return "review_if_needed_for_dashboard"
 
 
 def property_type_counts(chunk: pd.DataFrame) -> pd.Series:
@@ -293,8 +321,13 @@ def analyze_dataset(dataset_name: str, csv_path: Path, chunk_size: int) -> dict[
     for column in columns:
         base = base_column_name(column)
         field_group, field_category = classify_column(column)
+        relevance = dashboard_relevance(base, field_group)
         missing_count = int(missing_counts[column])
         missing_percent = round((missing_count / total_rows) * 100, 2) if total_rows else 0.0
+        over_90_percent_missing = missing_percent > MISSING_DROP_THRESHOLD
+        between_50_and_90_percent_missing = (
+            MISSING_REVIEW_THRESHOLD <= missing_percent <= MISSING_DROP_THRESHOLD
+        )
 
         column_profile.append(
             {
@@ -304,14 +337,14 @@ def analyze_dataset(dataset_name: str, csv_path: Path, chunk_size: int) -> dict[
                 "sample_dtype": sample_dtypes.get(column, ""),
                 "field_group": field_group,
                 "field_category": field_category,
+                "dashboard_relevance": relevance,
                 "is_core_analysis_field": base in CORE_ANALYSIS_FIELDS,
                 "non_null_count": int(total_rows - missing_count),
                 "missing_count": missing_count,
                 "missing_percent": missing_percent,
-                "over_90_percent_missing": missing_percent > 90,
-                "at_or_over_50_percent_missing": (
-                    missing_percent >= MISSING_DROP_REVIEW_THRESHOLD
-                ),
+                "over_90_percent_missing": over_90_percent_missing,
+                "between_50_and_90_percent_missing": between_50_and_90_percent_missing,
+                "at_or_over_50_percent_missing": missing_percent >= MISSING_REVIEW_THRESHOLD,
                 "recommended_action": recommendation(base, field_group, missing_percent),
             }
         )
@@ -348,11 +381,22 @@ def write_report(rows: list[dict[str, object]], output_path: Path, sort_by: list
 
 
 def sort_field_quality_report(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    action_priority = {
+        "drop_high_missing_field": 0,
+        "review_before_drop_dashboard_field": 1,
+        "review_optional_field_for_drop": 2,
+        "retain_dashboard_field_review_missingness": 3,
+        "retain_dashboard_field": 4,
+        "retain_optional_supporting_field": 5,
+        "retain_if_needed_for_traceability": 6,
+        "review_if_needed_for_dashboard": 7,
+    }
+
     return sorted(
         rows,
         key=lambda row: (
             str(row["dataset"]),
-            not bool(row["at_or_over_50_percent_missing"]),
+            action_priority.get(str(row["recommended_action"]), 99),
             -float(row["missing_percent"]),
             str(row["field_group"]),
             str(row["column"]),

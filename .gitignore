@@ -1,5 +1,6 @@
 data/
 raw data/
+outputs/
 *.csv
 *.xlsx
 *.xls
