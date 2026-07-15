@@ -731,7 +731,7 @@ using `CloseDate`.
     code(
         """
 mortgage_period = mortgage[
-    mortgage["year_month"].between("2024-01", "2026-05")
+    mortgage["year_month"].between("2024-01", "2026-06")
 ].copy()
 mortgage_period["month"] = pd.to_datetime(
     mortgage_period["year_month"] + "-01"

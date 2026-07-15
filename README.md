@@ -31,4 +31,11 @@ Week 3 - Exploratory Analysis and Mortgage Rate Enrichment:
 - Created `scripts/mortgage_rate_enrichment.py`.
 - Added monthly mortgage rates to the Residential listing and sold datasets.
 - Created `scripts/build_report_notebook.py`.
-- Created `notebooks/Weeks_2_3_Report.ipynb` as a readable combined report.
+- Created `notebooks/Weeks_2_3_Report.ipynb` as a readable combined validation and market-analysis report.
+
+Weeks 4-5 - Data Cleaning and Preparation:
+- Created `scripts/data_cleaning_preparation.py`.
+- Standardized date and numeric fields and removed columns with more than 90% missing data.
+- Flagged invalid numeric values and date-order issues while keeping otherwise useful records.
+- Limited the datasets to Residential properties in California using coordinates and a California state fallback for missing coordinates.
+- Created cleaned listing and sold datasets, quality reports, and `notebooks/Weeks_4_5_Report.ipynb`.
