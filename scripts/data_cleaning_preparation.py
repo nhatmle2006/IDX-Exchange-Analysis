@@ -8,10 +8,14 @@ small audit reports. Source files are never overwritten.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 from collections import Counter
+from functools import lru_cache
 from pathlib import Path
 
+import matplotlib.path as mpath
+import numpy as np
 import pandas as pd
 
 
@@ -20,6 +24,9 @@ DEFAULT_INPUT_DIR = PROJECT_ROOT / "data" / "enriched"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "cleaned"
 CHUNK_SIZE = 100_000
 MISSING_DROP_THRESHOLD = 90.0
+CALIFORNIA_BOUNDARY_PATH = (
+    PROJECT_ROOT / "reference" / "california_boundary_2025.geojson"
+)
 
 DATASETS = {
     "listings_residential": {
@@ -63,44 +70,54 @@ INVALID_VALUE_RULES = {
     "BathroomsTotalInteger": ("bathrooms_negative_flag", "negative"),
 }
 
-# A practical California coordinate boundary. The western edge is intentionally
-# broad so coastal records are not lost; the eastern edge follows the CA/NV-AZ
-# border closely enough to reject neighboring-state property coordinates.
-CALIFORNIA_BOUNDARY = [
-    (-124.5, 32.5),
-    (-117.0, 32.5),
-    (-114.600, 32.700),
-    (-114.550, 33.000),
-    (-114.450, 33.850),
-    (-114.140, 34.300),
-    (-114.100, 34.870),
-    (-114.630, 35.000),
-    (-120.0, 39.0),
-    (-120.0, 42.1),
-    (-124.5, 42.1),
-]
+@lru_cache(maxsize=1)
+def california_boundary_paths() -> tuple[
+    tuple[mpath.Path, tuple[mpath.Path, ...]], ...
+]:
+    """Load the official Census California boundary once per script run."""
+    if not CALIFORNIA_BOUNDARY_PATH.exists():
+        raise FileNotFoundError(
+            f"Missing California boundary file: {CALIFORNIA_BOUNDARY_PATH}"
+        )
+
+    boundary_data = json.loads(
+        CALIFORNIA_BOUNDARY_PATH.read_text(encoding="utf-8")
+    )
+    geometry = boundary_data["features"][0]["geometry"]
+    polygons = (
+        geometry["coordinates"]
+        if geometry["type"] == "MultiPolygon"
+        else [geometry["coordinates"]]
+    )
+
+    paths: list[tuple[mpath.Path, tuple[mpath.Path, ...]]] = []
+    for polygon in polygons:
+        exterior = mpath.Path(np.asarray(polygon[0], dtype=float))
+        holes = tuple(
+            mpath.Path(np.asarray(ring, dtype=float)) for ring in polygon[1:]
+        )
+        paths.append((exterior, holes))
+    return tuple(paths)
 
 
 def points_in_california(longitude: pd.Series, latitude: pd.Series) -> pd.Series:
-    """Return True for coordinates inside the California filter boundary."""
+    """Return True for coordinates inside the official California boundary."""
     x = pd.to_numeric(longitude, errors="coerce")
     y = pd.to_numeric(latitude, errors="coerce")
-    inside = pd.Series(False, index=x.index)
-    previous_x, previous_y = CALIFORNIA_BOUNDARY[-1]
+    x_values = x.to_numpy(dtype=float)
+    y_values = y.to_numpy(dtype=float)
+    points = np.column_stack([x_values, y_values])
+    usable = np.isfinite(x_values) & np.isfinite(y_values)
+    inside = np.zeros(len(points), dtype=bool)
 
-    for current_x, current_y in CALIFORNIA_BOUNDARY:
-        crosses = (current_y > y) != (previous_y > y)
-        denominator = previous_y - current_y
-        if denominator == 0:
-            denominator = 1e-12
-        edge_x = (
-            (previous_x - current_x) * (y - current_y) / denominator
-            + current_x
-        )
-        inside ^= crosses.fillna(False) & x.lt(edge_x).fillna(False)
-        previous_x, previous_y = current_x, current_y
+    for exterior, holes in california_boundary_paths():
+        polygon_inside = exterior.contains_points(points, radius=1e-10)
+        for hole in holes:
+            polygon_inside &= ~hole.contains_points(points, radius=-1e-10)
+        inside |= polygon_inside
 
-    return inside
+    inside &= usable
+    return pd.Series(inside, index=x.index)
 
 
 def normalized_state(values: pd.Series) -> pd.Series:
@@ -347,9 +364,9 @@ def clean_dataset(
         "output_columns": ("column_count", "Columns after cleaning and adding quality flags"),
         "rows_with_coordinates": ("geographic_quality", "Rows with usable latitude and longitude"),
         "rows_missing_coordinates": ("geographic_quality", "Rows missing latitude or longitude"),
-        "rows_inside_california_boundary": ("geographic_quality", "Rows kept using coordinates"),
+        "rows_inside_california_boundary": ("geographic_quality", "Rows kept using the official Census California boundary"),
         "rows_kept_by_ca_state_fallback": ("geographic_quality", "Missing-coordinate rows kept because state was CA"),
-        "rows_removed_outside_california": ("geographic_quality", "Rows with coordinates outside California"),
+        "rows_removed_outside_california": ("geographic_quality", "Rows with present coordinates that are invalid or outside the official California boundary"),
         "rows_removed_missing_coordinates_non_ca_state": ("geographic_quality", "Rows without coordinates and without a CA state label"),
         "state_labels_corrected_from_coordinates": ("geographic_quality", "Rows inside California whose original state label was not CA"),
         "zero_coordinate_rows": ("geographic_quality", "Rows with latitude or longitude equal to zero"),

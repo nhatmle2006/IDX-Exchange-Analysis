@@ -166,7 +166,8 @@ def combine_group(
             wrote_filtered_header = True
 
         duplicate_note = (
-            f"; removed {len(removed_duplicates)} exact duplicate columns"
+            f"; removed {len(removed_duplicates)} exact duplicate columns: "
+            f"{', '.join(sorted(removed_duplicates))}"
             if removed_duplicates
             else ""
         )
@@ -182,6 +183,9 @@ def combine_group(
                 "source_version": "filled" if "_filled" in path.stem.lower() else "plain",
                 "columns": len(columns),
                 "duplicate_columns_removed": len(removed_duplicates),
+                "duplicate_column_names_removed": "; ".join(
+                    sorted(removed_duplicates)
+                ),
                 "total_rows": file_rows,
                 "residential_rows": filtered_rows,
                 "non_residential_rows": file_rows - filtered_rows,
@@ -198,6 +202,7 @@ def combine_group(
         "source_version": "summary",
         "columns": "",
         "duplicate_columns_removed": "",
+        "duplicate_column_names_removed": "",
         "total_rows": total_rows,
         "residential_rows": total_filtered_rows,
         "non_residential_rows": total_rows - total_filtered_rows,

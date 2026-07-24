@@ -1,5 +1,6 @@
 """Build the executed Weeks 4-5 cleaning report and HTML copy."""
 
+import os
 from pathlib import Path
 
 import nbformat as nbf
@@ -439,10 +440,73 @@ display(
         """
 ## Week 5: California-Only Filter
 
-Coordinates are the primary location check. Rows with missing coordinates are
-kept only when the original state is `CA`. Rows whose coordinates confirm
-California but whose state label is wrong are corrected to `CA`; the original
-label is retained in `StateOrProvinceOriginal`.
+Coordinates are tested against the U.S. Census Bureau's January 1, 2025
+California state boundary. Rows with missing coordinates are kept only when the
+original state is `CA`. Rows whose coordinates confirm California but whose
+state label is wrong are corrected to `CA`; the original label is retained in
+`StateOrProvinceOriginal`.
+"""
+    ),
+    markdown("### California Boundary Used"),
+    code(
+        """
+import json
+
+
+boundary_path = ROOT / "reference" / "california_boundary_2025.geojson"
+boundary_data = json.loads(boundary_path.read_text(encoding="utf-8"))
+boundary_geometry = boundary_data["features"][0]["geometry"]
+boundary_polygons = (
+    boundary_geometry["coordinates"]
+    if boundary_geometry["type"] == "MultiPolygon"
+    else [boundary_geometry["coordinates"]]
+)
+boundary_points = [
+    point
+    for polygon in boundary_polygons
+    for ring in polygon
+    for point in ring
+]
+
+boundary_summary = pd.DataFrame(
+    [
+        {
+            "Boundary Source": "U.S. Census Bureau TIGERweb",
+            "Vintage": "January 1, 2025",
+            "State FIPS": "06",
+            "Geometry": boundary_geometry["type"],
+            "Polygons": len(boundary_polygons),
+            "Boundary Vertices": len(boundary_points),
+            "Minimum Latitude": min(point[1] for point in boundary_points),
+            "Maximum Latitude": max(point[1] for point in boundary_points),
+            "Minimum Longitude": min(point[0] for point in boundary_points),
+            "Maximum Longitude": max(point[0] for point in boundary_points),
+        }
+    ]
+)
+
+display(
+    boundary_summary.style
+    .hide(axis="index")
+    .format(
+        {
+            "Polygons": "{:,.0f}",
+            "Boundary Vertices": "{:,.0f}",
+            "Minimum Latitude": "{:.6f}",
+            "Maximum Latitude": "{:.6f}",
+            "Minimum Longitude": "{:.6f}",
+            "Maximum Longitude": "{:.6f}",
+        }
+    )
+)
+"""
+    ),
+    markdown(
+        """
+The latitude and longitude values above describe the boundary's outer extent;
+they are not used as a rectangular cutoff. Each property coordinate is tested
+against the complete seven-part California shape, which prevents Arizona,
+Nevada, Mexico, and ocean coordinates inside the broad extent from being kept.
 """
     ),
     code(
@@ -454,7 +518,7 @@ california_flow = pd.DataFrame(
             "Starting Rows": cleaning_value("listings_residential", "source_rows"),
             "Kept by Coordinates": cleaning_value("listings_residential", "rows_inside_california_boundary"),
             "Kept by CA State Fallback": cleaning_value("listings_residential", "rows_kept_by_ca_state_fallback"),
-            "Removed Outside CA": cleaning_value("listings_residential", "rows_removed_outside_california"),
+            "Invalid/Outside CA Coordinates": cleaning_value("listings_residential", "rows_removed_outside_california"),
             "Removed Missing Coordinates/Non-CA": cleaning_value("listings_residential", "rows_removed_missing_coordinates_non_ca_state"),
             "State Labels Corrected": cleaning_value("listings_residential", "state_labels_corrected_from_coordinates"),
             "Final Rows": cleaning_value("listings_residential", "output_rows"),
@@ -464,7 +528,7 @@ california_flow = pd.DataFrame(
             "Starting Rows": cleaning_value("sold_residential", "source_rows"),
             "Kept by Coordinates": cleaning_value("sold_residential", "rows_inside_california_boundary"),
             "Kept by CA State Fallback": cleaning_value("sold_residential", "rows_kept_by_ca_state_fallback"),
-            "Removed Outside CA": cleaning_value("sold_residential", "rows_removed_outside_california"),
+            "Invalid/Outside CA Coordinates": cleaning_value("sold_residential", "rows_removed_outside_california"),
             "Removed Missing Coordinates/Non-CA": cleaning_value("sold_residential", "rows_removed_missing_coordinates_non_ca_state"),
             "State Labels Corrected": cleaning_value("sold_residential", "state_labels_corrected_from_coordinates"),
             "Final Rows": cleaning_value("sold_residential", "output_rows"),
@@ -482,6 +546,261 @@ display(
             if column != "Dataset"
         }
     )
+)
+"""
+    ),
+    markdown("### Why 114 Sold Coordinates Were Excluded"),
+    code(
+        """
+sold_geo_fields = [
+    "StateOrProvince",
+    "Latitude",
+    "Longitude",
+]
+sold_geo = pd.read_csv(
+    ENRICHED_DIR / "sold_residential_with_mortgage_rates.csv",
+    usecols=sold_geo_fields,
+    low_memory=False,
+)
+sold_geo["Latitude"] = pd.to_numeric(sold_geo["Latitude"], errors="coerce")
+sold_geo["Longitude"] = pd.to_numeric(sold_geo["Longitude"], errors="coerce")
+sold_state = (
+    sold_geo["StateOrProvince"]
+    .astype("string")
+    .str.strip()
+    .str.upper()
+    .fillna("")
+)
+sold_has_coordinates = (
+    sold_geo["Latitude"].notna() & sold_geo["Longitude"].notna()
+)
+sold_inside_california = points_in_california(
+    sold_geo["Longitude"], sold_geo["Latitude"]
+)
+sold_excluded = sold_has_coordinates & ~sold_inside_california
+
+zero_coordinate = sold_excluded & (
+    sold_geo["Latitude"].eq(0) | sold_geo["Longitude"].eq(0)
+)
+impossible_coordinate = sold_excluded & ~zero_coordinate & (
+    ~sold_geo["Latitude"].between(-90, 90)
+    | ~sold_geo["Longitude"].between(-180, 180)
+)
+positive_longitude = (
+    sold_excluded
+    & ~zero_coordinate
+    & ~impossible_coordinate
+    & sold_geo["Longitude"].gt(0)
+)
+outside_valid_format = (
+    sold_excluded
+    & ~zero_coordinate
+    & ~impossible_coordinate
+    & ~positive_longitude
+)
+outside_non_ca_label = outside_valid_format & sold_state.ne("CA")
+outside_ca_label = outside_valid_format & sold_state.eq("CA")
+
+reason_masks = [
+    (
+        zero_coordinate,
+        "Zero coordinate",
+        "Latitude or longitude equals zero; 37 records are exactly (0, 0).",
+    ),
+    (
+        positive_longitude,
+        "Positive longitude",
+        "California longitudes are negative; the minus sign is missing or the values are malformed.",
+    ),
+    (
+        impossible_coordinate,
+        "Impossible global coordinate",
+        "Latitude is outside -90 to 90 or longitude is outside -180 to 180.",
+    ),
+    (
+        outside_non_ca_label,
+        "Outside California; non-CA label",
+        "Coordinate is outside the Census boundary and the original state label is not CA.",
+    ),
+    (
+        outside_ca_label,
+        "Outside California; CA label conflict",
+        "Coordinate is outside the Census boundary even though the original state label says CA.",
+    ),
+]
+
+sold_exclusion_summary = pd.DataFrame(
+    [
+        {
+            "Exclusion Reason": label,
+            "Sold Rows": int(mask.sum()),
+            "Why Excluded": explanation,
+        }
+        for mask, label, explanation in reason_masks
+    ]
+)
+assert int(sold_exclusion_summary["Sold Rows"].sum()) == 114
+assert int(sold_excluded.sum()) == cleaning_value(
+    "sold_residential", "rows_removed_outside_california"
+)
+
+display(
+    sold_exclusion_summary.style
+    .hide(axis="index")
+    .format({"Sold Rows": "{:,.0f}"})
+)
+"""
+    ),
+    markdown("### Why 373 Listing Coordinates Were Excluded"),
+    code(
+        """
+listing_geo_fields = [
+    "StateOrProvince",
+    "Latitude",
+    "Longitude",
+]
+listing_geo = pd.read_csv(
+    ENRICHED_DIR / "listings_residential_with_mortgage_rates.csv",
+    usecols=listing_geo_fields,
+    low_memory=False,
+)
+listing_geo["Latitude"] = pd.to_numeric(
+    listing_geo["Latitude"], errors="coerce"
+)
+listing_geo["Longitude"] = pd.to_numeric(
+    listing_geo["Longitude"], errors="coerce"
+)
+listing_state = (
+    listing_geo["StateOrProvince"]
+    .astype("string")
+    .str.strip()
+    .str.upper()
+    .fillna("")
+)
+listing_has_coordinates = (
+    listing_geo["Latitude"].notna() & listing_geo["Longitude"].notna()
+)
+listing_inside_california = points_in_california(
+    listing_geo["Longitude"], listing_geo["Latitude"]
+)
+listing_coordinate_excluded = (
+    listing_has_coordinates & ~listing_inside_california
+)
+
+listing_zero_coordinate = listing_coordinate_excluded & (
+    listing_geo["Latitude"].eq(0) | listing_geo["Longitude"].eq(0)
+)
+listing_impossible_coordinate = (
+    listing_coordinate_excluded
+    & ~listing_zero_coordinate
+    & (
+        ~listing_geo["Latitude"].between(-90, 90)
+        | ~listing_geo["Longitude"].between(-180, 180)
+    )
+)
+listing_positive_longitude = (
+    listing_coordinate_excluded
+    & ~listing_zero_coordinate
+    & ~listing_impossible_coordinate
+    & listing_geo["Longitude"].gt(0)
+)
+listing_outside_valid_format = (
+    listing_coordinate_excluded
+    & ~listing_zero_coordinate
+    & ~listing_impossible_coordinate
+    & ~listing_positive_longitude
+)
+listing_outside_non_ca_label = (
+    listing_outside_valid_format & listing_state.ne("CA")
+)
+listing_outside_ca_label = (
+    listing_outside_valid_format & listing_state.eq("CA")
+)
+
+listing_reason_masks = [
+    (
+        listing_zero_coordinate,
+        "Zero coordinate",
+        "Latitude or longitude equals zero and cannot represent a California property location.",
+    ),
+    (
+        listing_positive_longitude,
+        "Positive longitude",
+        "California longitudes are negative; the minus sign is missing or the values are malformed.",
+    ),
+    (
+        listing_impossible_coordinate,
+        "Impossible global coordinate",
+        "Latitude is outside -90 to 90 or longitude is outside -180 to 180.",
+    ),
+    (
+        listing_outside_non_ca_label,
+        "Outside California; non-CA label",
+        "Coordinate is outside the Census boundary and the original state label is not CA.",
+    ),
+    (
+        listing_outside_ca_label,
+        "Outside California; CA label conflict",
+        "Coordinate is outside the Census boundary even though the original state label says CA.",
+    ),
+]
+
+listing_exclusion_summary = pd.DataFrame(
+    [
+        {
+            "Exclusion Reason": label,
+            "Listing Rows": int(mask.sum()),
+            "Why Excluded": explanation,
+        }
+        for mask, label, explanation in listing_reason_masks
+    ]
+)
+assert int(listing_exclusion_summary["Listing Rows"].sum()) == 373
+assert int(listing_coordinate_excluded.sum()) == cleaning_value(
+    "listings_residential", "rows_removed_outside_california"
+)
+
+display(
+    listing_exclusion_summary.style
+    .hide(axis="index")
+    .format({"Listing Rows": "{:,.0f}"})
+)
+
+listing_missing_non_ca = (
+    ~listing_has_coordinates & listing_state.ne("CA")
+)
+listing_removal_reconciliation = pd.DataFrame(
+    [
+        {
+            "Listing Removal Type": "Invalid or outside-California coordinates",
+            "Rows": int(listing_coordinate_excluded.sum()),
+        },
+        {
+            "Listing Removal Type": "Missing coordinates without a CA state label",
+            "Rows": int(listing_missing_non_ca.sum()),
+        },
+        {
+            "Listing Removal Type": "Total listing rows removed",
+            "Rows": int(
+                listing_coordinate_excluded.sum()
+                + listing_missing_non_ca.sum()
+            ),
+        },
+    ]
+)
+assert int(listing_missing_non_ca.sum()) == cleaning_value(
+    "listings_residential",
+    "rows_removed_missing_coordinates_non_ca_state",
+)
+assert int(listing_removal_reconciliation.iloc[-1]["Rows"]) == cleaning_value(
+    "listings_residential", "rows_removed_total"
+)
+
+display(HTML("<h4>Listing removal reconciliation</h4>"))
+display(
+    listing_removal_reconciliation.style
+    .hide(axis="index")
+    .format({"Rows": "{:,.0f}"})
 )
 """
     ),
@@ -508,8 +827,8 @@ display(
         """
 ### Geographic Data Quality
 
-Zero coordinates and positive longitudes are invalid for California and were
-excluded by the coordinate boundary. Missing-coordinate rows retained through
+The exclusion reasons above are mutually exclusive and sum to 114 sold rows.
+Missing-coordinate rows are not included in that total; rows retained through
 the CA-state fallback remain flagged in the final datasets.
 """
     ),
@@ -517,8 +836,6 @@ the CA-state fallback remain flagged in the final datasets.
         """
 geographic_metrics = {
     "rows_missing_coordinates": "Rows Missing Coordinates",
-    "zero_coordinate_rows": "Zero-Coordinate Rows",
-    "positive_longitude_rows": "Positive-Longitude Rows",
 }
 geographic_rows = []
 for dataset_name, dataset_label in [
@@ -629,6 +946,7 @@ steps.
 
 - CRMLS monthly listing and sold files, January 2024 through June 2026
 - Mortgage-enriched Residential listing and sold datasets
+- U.S. Census Bureau TIGERweb California state boundary, January 1, 2025 vintage
 - Week 4-5 cleaning summaries and California-only output datasets
 """
     ),
@@ -640,13 +958,14 @@ nbf.write(notebook, NOTEBOOK_PATH)
 client = NotebookClient(
     notebook,
     timeout=300,
-    kernel_name="python3",
+    kernel_name=os.environ.get("WEEKS45_KERNEL_NAME", "python3"),
     resources={"metadata": {"path": str(ROOT)}},
 )
 client.execute()
 nbf.write(notebook, NOTEBOOK_PATH)
 
 exporter = HTMLExporter()
+exporter.exclude_input = True
 exporter.exclude_input_prompt = True
 exporter.exclude_output_prompt = True
 html, _ = exporter.from_notebook_node(notebook)

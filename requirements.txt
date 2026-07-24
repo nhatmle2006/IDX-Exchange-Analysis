@@ -1,4 +1,6 @@
 pandas
 requests
 matplotlib
+numpy
+shapely>=2.0,<3.0
 jupyter

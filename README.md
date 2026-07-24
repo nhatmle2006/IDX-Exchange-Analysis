@@ -14,6 +14,7 @@ Week 1 - Monthly Dataset Aggregation:
 - Combined monthly listing files into one unfiltered listing dataset.
 - Combined monthly sold files into one unfiltered sold dataset.
 - Created Residential-only filtered versions of both datasets.
+- Verified and removed 11 exact duplicate columns from the monthly listing files.
 - Created row-count reports showing monthly totals and Residential-filtered totals.
 
 Week 2 - Dataset Validation:
@@ -37,5 +38,12 @@ Weeks 4-5 - Data Cleaning and Preparation:
 - Created `scripts/data_cleaning_preparation.py`.
 - Standardized date and numeric fields and removed columns with more than 90% missing data.
 - Flagged invalid numeric values and date-order issues while keeping otherwise useful records.
-- Limited the datasets to Residential properties in California using coordinates and a California state fallback for missing coordinates.
+- Limited the datasets to Residential properties using the official Census California boundary and a California state fallback for missing coordinates.
 - Created cleaned listing and sold datasets, quality reports, and `notebooks/Weeks_4_5_Report.ipynb`.
+
+Week 6 - Feature Engineering and Market Metrics:
+- Created `scripts/feature_engineering.py`.
+- Added price ratios, price per square foot, closing month fields, and contract timeline metrics.
+- Assigned properties to official 2024-25 California school district boundaries using latitude and longitude.
+- Created property type, property subtype, county, MLS area, office, and school district summaries.
+- Created `notebooks/Week_6_Report.ipynb` as a readable feature-engineering report.
