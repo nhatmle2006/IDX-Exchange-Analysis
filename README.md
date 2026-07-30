@@ -47,3 +47,10 @@ Week 6 - Feature Engineering and Market Metrics:
 - Assigned properties to official 2024-25 California school district boundaries using latitude and longitude.
 - Created property type, property subtype, county, MLS area, office, and school district summaries.
 - Created `notebooks/Week_6_Report.ipynb` as a readable feature-engineering report.
+
+Week 7 - Outlier Detection and Data Quality:
+- Created `scripts/outlier_detection.py`.
+- Applied business rules and tiered IQR flags to key listing and sold fields.
+- Preserved full flagged datasets and created separate analysis-ready filtered datasets.
+- Compared dataset size, medians, and averages before and after filtering.
+- Created `notebooks/Week_7_Report.ipynb` as a readable outlier-analysis report.
