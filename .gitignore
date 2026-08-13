@@ -16,3 +16,7 @@ env/
 Thumbs.db
 tmp/
 reference/school_district_areas_2024_25.geojson
+tableau/*.twb
+tableau/*.twbx
+tableau/**/*.twb
+tableau/**/*.twbx

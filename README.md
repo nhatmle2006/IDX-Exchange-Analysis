@@ -7,7 +7,7 @@ This repository stores the Python scripts used to prepare CRMLS listing and sold
 Week 0 - MLS Data Pipeline Orientation:
 - Downloaded the monthly CRMLS listing and sold CSV files.
 - Organized the raw files locally in `raw data/`.
-- Confirmed monthly coverage from `202401` through `202606` for both listing and sold data.
+- Confirmed monthly coverage from `202401` through `202607` for both listing and sold data.
 
 Week 1 - Monthly Dataset Aggregation:
 - Created `scripts/combine_monthly_files.py`.
@@ -54,3 +54,18 @@ Week 7 - Outlier Detection and Data Quality:
 - Preserved full flagged datasets and created separate analysis-ready filtered datasets.
 - Compared dataset size, medians, and averages before and after filtering.
 - Created `notebooks/Week_7_Report.ipynb` as a readable outlier-analysis report.
+
+Week 8 - Tableau Data Preparation:
+- Created `scripts/prepare_tableau_data.py` to produce streamlined Tableau sources from Residential California records using the 3.0 IQR extreme filter.
+- Combined listing and sold activity into one market-analysis source while retaining the fields needed for metrics, geography, property filters, and school districts.
+- Created `scripts/build_week8_tableau_workbook.py` and validated the initial Tableau worksheets and packaged extract.
+
+Week 9 - California Market Pulse Dashboard:
+- Created `scripts/build_market_pulse_dashboard.py` to generate and validate the first final dashboard.
+- Built July 2026 KPI cards for median close price, new listings, closed sales, average days on market, and sale-to-original-list ratio.
+- Added monthly price, market activity, days-on-market, sale ratio, and mortgage-rate trends with focused axes and shared county, city, and property-subtype filters.
+
+Current Project Recap:
+- The analysis covers January 2024 through July 2026 and uses Residential California properties for the dashboard population.
+- The validated Tableau market source contains 1,006,536 listing and sold activity rows after applying the 3.0 IQR extreme-value filter.
+- Raw data, generated CSV files, and packaged Tableau workbooks remain local; GitHub stores the reproducible Python scripts, reports, and documentation.

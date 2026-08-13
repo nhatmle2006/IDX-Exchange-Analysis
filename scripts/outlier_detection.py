@@ -23,6 +23,8 @@ DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "data" / "outliers"
 CHUNK_SIZE = 50_000
 IQR_MULTIPLIER = 1.5
 EXTREME_IQR_MULTIPLIER = 3.0
+MIN_LIST_TO_ORIGINAL_RATIO = 0.10
+MAX_LIST_TO_ORIGINAL_RATIO = 10.0
 
 
 @dataclass(frozen=True)
@@ -229,6 +231,7 @@ def process_dataset(
         "AnyIQRRows": 0,
         "AnyOutlierRows": 0,
         "AnalysisExcludedRows": 0,
+        "ListPriceOriginalMismatchRows": 0,
     }
     for metric in dataset_rule.metrics:
         counters[f"{metric.field}IQRRows"] = 0
@@ -314,6 +317,47 @@ def process_dataset(
                     extreme_iqr_flag,
                     f"{metric.field} outside 3.0 IQR extreme fence",
                 )
+
+        list_price_mismatch = pd.Series(False, index=chunk.index)
+        list_to_original_ratio = pd.Series(
+            np.nan,
+            index=chunk.index,
+            dtype="float64",
+        )
+        if dataset_rule.name == "listings_residential":
+            list_price = pd.to_numeric(
+                chunk["ListPrice"],
+                errors="coerce",
+            )
+            original_list_price = pd.to_numeric(
+                chunk["OriginalListPrice"],
+                errors="coerce",
+            )
+            valid_prices = list_price.gt(0) & original_list_price.gt(0)
+            list_to_original_ratio.loc[valid_prices] = (
+                list_price.loc[valid_prices]
+                / original_list_price.loc[valid_prices]
+            )
+            list_price_mismatch = list_to_original_ratio.notna() & (
+                list_to_original_ratio.lt(MIN_LIST_TO_ORIGINAL_RATIO)
+                | list_to_original_ratio.gt(MAX_LIST_TO_ORIGINAL_RATIO)
+            )
+            mismatch_label = (
+                "ListPrice / OriginalListPrice outside 0.10 to 10.0"
+            )
+            append_reason(reasons, list_price_mismatch, mismatch_label)
+            append_reason(
+                exclusion_reasons,
+                list_price_mismatch,
+                mismatch_label,
+            )
+            business_invalid |= list_price_mismatch
+
+        chunk["ListToOriginalListRatio"] = list_to_original_ratio
+        chunk["ListPriceOriginalMismatchFlag"] = list_price_mismatch
+        counters["ListPriceOriginalMismatchRows"] += int(
+            list_price_mismatch.sum()
+        )
 
         date_invalid = pd.Series(False, index=chunk.index)
         for field in DATE_SEQUENCE_FIELDS:
