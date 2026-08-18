@@ -69,3 +69,5 @@ Current Project Recap:
 - The analysis covers January 2024 through July 2026 and uses Residential California properties for the dashboard population.
 - The validated Tableau market source contains 1,006,536 listing and sold activity rows after applying the 3.0 IQR extreme-value filter.
 - Raw data, generated CSV files, and packaged Tableau workbooks remain local; GitHub stores the reproducible Python scripts, reports, and documentation.
+
+1st Dashboard: https://public.tableau.com/views/california_market_pulse_final/CaliforniaMarketPulse?:language=en-US&:sid=&:redirect=auth&:display_count=n&:origin=viz_share_link
